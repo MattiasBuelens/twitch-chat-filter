@@ -1045,17 +1045,6 @@ function matches_filters(message, from){
     return matches;
 }
 
-function rewrite_with_active_rewriters(message, from){
-    var newMessage = message || "";
-    from = from || "";
-    forEach(TCF_REWRITERS, function(setting){
-        if(setting.getValue()){
-            newMessage = (setting.message_rewriter(newMessage, from) || newMessage);
-        }
-    });
-    return newMessage;
-}
-
 add_initializer(function(){
     // Filter toggles
     var customCSS = [];
@@ -1095,6 +1084,45 @@ add_initializer(function(){
             chatLine.toggleClass(setting.name, setting.message_filter(message, from));
         });
     });
+});
+
+// ============================
+// Chat Rewriting
+// ============================
+
+function rewrite_with_active_rewriters(message, from){
+    var newMessage = message || "";
+    from = from || "";
+    forEach(TCF_REWRITERS, function(setting){
+        if(setting.getValue()){
+            newMessage = (setting.message_rewriter(newMessage, from) || newMessage);
+        }
+    });
+    return newMessage;
+}
+
+add_initializer(function(){
+    var View_proto = require("web-client/views/line")["default"].prototype;
+
+    var original_willInsertElement = View_proto.willInsertElement;
+    View_proto.willInsertElement = function() {
+        original_willInsertElement.apply(this, arguments);
+        // Apply rewiters
+        var old_message = this.get("context.model.message");
+        var new_message = rewrite_with_active_rewriters(old_message, this.get("context.model.from"));
+        console.log("Rewrite:", old_message);
+        console.log("Rewritten:", new_message);
+        // Replace message while rendering
+        this.set("$old_message", old_message);
+        this.set("context.model.message", new_message);
+    };
+    var original_didInsertElement = View_proto.didInsertElement;
+    View_proto.didInsertElement = function() {
+        // Restore message after rendering
+        this.set("context.model.message", this.get("$old_message"));
+        this.set("$old_message", undefined);
+        original_didInsertElement.apply(this, arguments);
+    };
 });
 
 // ============================
@@ -1259,11 +1287,7 @@ add_initializer(function(){
     Room_proto.addMessage = function(info) {
         if(info.style === "admin"){
             if(!update_slowmode_with_admin_message(info.message)){ return false }
-        }else{
-            // Apply rewriters to future messages
-            info.message = rewrite_with_active_rewriters(info.message, info.from);
         }
-        
         return original_addMessage.apply(this, arguments);
     };
 
