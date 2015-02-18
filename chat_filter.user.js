@@ -1125,6 +1125,16 @@ function unsend_last_message(){
     slowmode_prev_message = null;
 }
 
+function prevent_slowmode_send_repeat(message_text){
+    if(get_setting_value("TppSlowmodeHelper")){
+        if(slowmode_last_message && message_text === slowmode_last_message.text){
+            // Add a space at the front to prevent repeated message
+            message_text = ' ' + message_text;
+        }
+    }
+    return message_text;
+}
+
 function update_slowmode_with_admin_message(admin_text){
     var regex_result;
     if(/now in slow mode/.test(admin_text)){
@@ -1177,13 +1187,6 @@ function slowmode_status(next_message){
         var antiflicker_wait = slowmode_last_action_time + slowmode_antiflicker_ms - now;
         if(antiflicker_wait > 0){
             return {blocked : true, error : "", wait : null};
-        }
-    
-        if(next_message === slowmode_last_message.text){
-            var repeat_wait = slowmode_last_message.time + 1000 * slowmode_repeat_limit_sec - now;
-            if(repeat_wait > 0){
-                return {blocked:true, error:"repeated message", wait : repeat_wait};
-            }
         }
         
         var rate_wait = slowmode_last_message.time + 1000 * slowmode_rate_limit_sec - now;
@@ -1270,7 +1273,9 @@ add_initializer(function(){
 
     var original_send = Room_proto.send;
     Room_proto.send = function(message){
+        message = prevent_slowmode_send_repeat(message);
         update_slowmode_last_message(message);
+        arguments[0] = message;
         return original_send.apply(this, arguments);
     };
 });
