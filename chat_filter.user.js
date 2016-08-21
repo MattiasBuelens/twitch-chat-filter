@@ -1082,29 +1082,38 @@ add_initializer(function(){
     add_custom_css(customCSS);
 });
 
-add_initializer(function(){
-    var View_proto = require("web-client/components/chat/chat-line/component")["default"].prototype;
-
-    // New lines
-    var original_didInsertElement = View_proto.didInsertElement;
-    View_proto.didInsertElement = function() {
-        original_didInsertElement.apply(this, arguments);
-
-        var view = this.$();
-        var matches = matches_filters(this.get("msgObject.message"), this.get("msgObject.from"));
+// New lines
+var EmberComputed = require("ember-computed")["default"];
+var ChatLineView = require("web-client/components/chat/message-line/component")["default"];
+ChatLineView.reopen({
+    classNameBindings: ["tcfMessageClasses"],
+    tcfMessageClasses: EmberComputed("msgObject.message", "msgObject.from", function(){
+        var classes = [];
+        var message = this.get("msgObject.message");
+        var from = this.get("msgObject.from");
+        var matches = matches_filters(message, from);
         for (var filter in matches) {
-            view.toggleClass(filter, matches[filter]);
+            if (matches[filter]) {
+                classes.push(filter);
+            }
         }
-    };
+        return classes.join(' ');
+    })
+});
+// Ember.Object.reopen is lazy, create an instance to apply it immediately
+// https://github.com/emberjs/ember.js/issues/3783
+//var dummy = ChatLineView.create();
 
+add_initializer(function(){
     // Existing lines
     $(CHAT_LINE_SELECTOR).each(function(){
         var view = $(this);
         var message = view.find(CHAT_MESSAGE_SELECTOR).text().trim();
         var from = view.find(CHAT_FROM_SELECTOR).text().trim();
-        forEach(TCF_FILTERS, function(setting) {
-            view.toggleClass(setting.name, setting.message_filter(message, from));
-        });
+        var matches = matches_filters(message, from);
+        for (var filter in matches) {
+            view.toggleClass(filter, matches[filter]);
+        }
         //Sadly, we can't apply rewriters to old messages because they are in HTML format.
     });
 });
@@ -1263,34 +1272,34 @@ add_setting({
 // Incoming message monitoring
 // ============================
 
-add_initializer(function(){
-
-    var Room_proto = require("web-client/models/room")["default"].prototype;
-
-    var original_addMessage = Room_proto.addMessage;
-    Room_proto.addMessage = function(info) {
+var RoomModel = require("web-client/models/room")["default"];
+RoomModel.reopen({
+    addMessage: function (info) {
         if(info.style === "admin"){
             if(!update_slowmode_with_admin_message(info.message)){ return false }
         }else{
             // TODO Apply rewriters to future messages
             // info.message = rewrite_with_active_rewriters(info.message, info.from);
         }
-        
-        return original_addMessage.apply(this, arguments);
-    };
-
-    var original_send = Room_proto.send;
-    Room_proto.send = function(message){
+        return this._super.apply(this, arguments);
+    },
+    send: function(message){
         update_slowmode_last_message(message);
-        return original_send.apply(this, arguments);
-    };
+        return this._super.apply(this, arguments);
+    }
 });
 
 // ============================
 // Main
 // ============================
 
+var initialized = false;
 function main() {
+    if (initialized) {
+        return;
+    }
+
+    initialized = true;
     run_initializers();
     load_settings();
 
@@ -1301,13 +1310,15 @@ if ($(SETTINGS_MENU_SELECTOR).length) {
     // Already initialized
     main();
 } else {
-    // Initialize when chat view is inserted
-    var ChatView_proto = require("web-client/views/chat")["default"].prototype;
-    var original_didInsertElement = ChatView_proto.didInsertElement;
-    ChatView_proto.didInsertElement = function(){
-        original_didInsertElement && original_didInsertElement.apply(this, arguments);
-        main();
-    };
+    // Initialize when settings view is inserted
+    var SettingsView = require("web-client/views/settings")["default"];
+    SettingsView.reopen({
+        didInsertElement: function () {
+            var result = this._super.apply(this, arguments);
+            main();
+            return result;
+        }
+    });
 }
 
 }));
